@@ -1,0 +1,70 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: omnifin-db
+    environment:
+      POSTGRES_DB: ${DB_NAME:-omnifin_primary}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-password}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    container_name: omnifin-redis
+    ports:
+      - "6379:6379"
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: omnifin-backend
+    env_file:
+      - .env.backend
+    environment:
+      - DB_NAME=${DB_NAME:-omnifin_primary}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-password}
+      - DB_HOST=${DB_HOST:-db}
+      - DB_PORT=${DB_PORT:-5432}
+    depends_on:
+      - db
+      - redis
+    ports:
+      - "8000:8000"
+    # If you want live code reload in dev, you can mount code (requires different command)
+    # volumes:
+    #   - ./backend:/app
+
+  celery:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: omnifin-celery
+    command: ["celery", "-A", "omnifin", "worker", "-l", "info"]
+    env_file:
+      - .env.backend
+    depends_on:
+      - redis
+      - backend
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # The browser will call backend via localhost because ports are published on host
+        REACT_APP_API_URL: ${REACT_APP_API_URL:-http://localhost:8000/api}
+    container_name: omnifin-frontend
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+    # If proxying /api via nginx, adjust nginx.conf and omit REACT_APP_API_URL
+
+volumes:
+  db-data:
